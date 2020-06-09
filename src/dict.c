@@ -205,8 +205,9 @@ int dictRehash(dict *d, int n) {
             uint64_t h;
 
             nextde = de->next;
+            de->hash = dictHashKey(d, de->key);            
             /* Get the index in the new hash table */
-            h = dictHashKey(d, de->key) & d->ht[1].sizemask;
+            h = de->hash & d->ht[1].sizemask;
             de->next = d->ht[1].table[h];
             d->ht[1].table[h] = de;
             d->ht[0].used--;
@@ -299,7 +300,8 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 
     /* Get the index of the new element, or -1 if
      * the element already exists. */
-    if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
+    uint64_t hash = dictHashKey(d,key);
+    if ((index = _dictKeyIndex(d, key, hash, existing)) == -1)
         return NULL;
 
     /* Allocate the memory and store the new entry.
@@ -314,6 +316,7 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 
     /* Set the hash entry fields. */
     dictSetKey(d, entry, key);
+    entry->hash = hash;    
     return entry;
 }
 
@@ -376,7 +379,7 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
         he = d->ht[table].table[idx];
         prevHe = NULL;
         while(he) {
-            if (key==he->key || dictCompareKeys(d, key, he->key)) {
+            if (key==he->key || (he->hash==h && dictCompareKeys(d, key, he->key)) ) {            
                 /* Unlink the element from the list */
                 if (prevHe)
                     prevHe->next = he->next;
@@ -485,7 +488,7 @@ dictEntry *dictFind(dict *d, const void *key)
         idx = h & d->ht[table].sizemask;
         he = d->ht[table].table[idx];
         while(he) {
-            if (key==he->key || dictCompareKeys(d, key, he->key))
+            if (key==he->key || (he->hash==h && dictCompareKeys(d, key, he->key)) )            
                 return he;
             he = he->next;
         }
@@ -1005,7 +1008,7 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
         /* Search if this slot does not already contain the given key */
         he = d->ht[table].table[idx];
         while(he) {
-            if (key==he->key || dictCompareKeys(d, key, he->key)) {
+            if (key==he->key || (he->hash==hash && dictCompareKeys(d, key, he->key)) ) {
                 if (existing) *existing = he;
                 return -1;
             }
@@ -1177,7 +1180,7 @@ dictType BenchmarkDictType = {
 #define start_benchmark() start = timeInMilliseconds()
 #define end_benchmark(msg) do { \
     elapsed = timeInMilliseconds()-start; \
-    printf(msg ": %ld items in %lld ms\n", count, elapsed); \
+    printf(msg ": %ld : items in : %lld : ms\n", count, elapsed); \
 } while(0);
 
 /* dict-benchmark [count] */
@@ -1198,7 +1201,7 @@ int main(int argc, char **argv) {
         int retval = dictAdd(dict,sdsfromlonglong(j),(void*)j);
         assert(retval == DICT_OK);
     }
-    end_benchmark("Inserting");
+    end_benchmark("Inserting:");
     assert((long)dictSize(dict) == count);
 
     /* Wait for rehashing. */
@@ -1213,7 +1216,7 @@ int main(int argc, char **argv) {
         assert(de != NULL);
         sdsfree(key);
     }
-    end_benchmark("Linear access of existing elements");
+    end_benchmark("Linear access of existing elements:");
 
     start_benchmark();
     for (j = 0; j < count; j++) {
@@ -1222,7 +1225,7 @@ int main(int argc, char **argv) {
         assert(de != NULL);
         sdsfree(key);
     }
-    end_benchmark("Linear access of existing elements (2nd round)");
+    end_benchmark("Linear access of existing elements (2nd round):");
 
     start_benchmark();
     for (j = 0; j < count; j++) {
@@ -1231,7 +1234,7 @@ int main(int argc, char **argv) {
         assert(de != NULL);
         sdsfree(key);
     }
-    end_benchmark("Random access of existing elements");
+    end_benchmark("Random access of existing elements:");
 
     start_benchmark();
     for (j = 0; j < count; j++) {
@@ -1241,7 +1244,7 @@ int main(int argc, char **argv) {
         assert(de == NULL);
         sdsfree(key);
     }
-    end_benchmark("Accessing missing");
+    end_benchmark("Accessing missing:");
 
     start_benchmark();
     for (j = 0; j < count; j++) {
@@ -1252,6 +1255,6 @@ int main(int argc, char **argv) {
         retval = dictAdd(dict,key,(void*)j);
         assert(retval == DICT_OK);
     }
-    end_benchmark("Removing and adding");
+    end_benchmark("Removing and adding:");
 }
 #endif
