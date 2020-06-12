@@ -205,7 +205,7 @@ int dictRehash(dict *d, int n) {
             uint64_t h;
 
             nextde = de->next;
-            de->hash = dictHashKey(d, de->key);            
+        /*    de->hash = dictHashKey(d, de->key);            */
             /* Get the index in the new hash table */
             h = de->hash & d->ht[1].sizemask;
             de->next = d->ht[1].table[h];
@@ -1144,6 +1144,8 @@ void dictGetStats(char *buf, size_t bufsize, dict *d) {
 
 /* ------------------------------- Benchmark ---------------------------------*/
 
+#ifdef DICT_BENCHMARK_MAIN
+
 #include "sds.h"
 
 uint64_t hashCallback(const void *key) {
@@ -1201,16 +1203,19 @@ int main(int argc, char **argv) {
     dict *dict = dictCreate(&BenchmarkDictType,NULL);
     long count = 0;
 
-    if (argc == 2) {
+    if (argc > 1) {
         count = strtol(argv[1],NULL,10);
     } else {
         count = 5000000;
     }
 
     sds *keys = zmalloc(sizeof *keys * count);
+    sds *altkeys = zmalloc(sizeof *keys * count);
     start_benchmark();
     for (j = 0; j < count; j++) {
-        keys[j] = sdsfromlonglong(j);        
+        long k = j + count;
+        keys[j] = sdsfromlonglong(k*k);
+        altkeys[j] = sdsfromlonglong(count + k*k*k);
     }
     end_benchmark("Generate keys:");
 
@@ -1221,12 +1226,15 @@ int main(int argc, char **argv) {
     }
     end_benchmark("Inserting:");
     assert((long)dictSize(dict) == count);
-
+      
     /* Wait for rehashing. */
     while (dictIsRehashing(dict)) {
         dictRehashMilliseconds(dict,100);
     }
 
+    char stats[1024];
+    if(argc > 2) dictGetStats(stats, 1024, dict);
+        
     start_benchmark();
     for (j = 0; j < count; j++) {        
         dictEntry *de = dictFind(dict,keys[j]);
@@ -1241,9 +1249,12 @@ int main(int argc, char **argv) {
     }
     end_benchmark("Linear access of existing elements (2nd round):");
 
-    start_benchmark();
-    shuffle(keys, count);
-    end_benchmark("Shuffle keys:");
+    if(argc > 1){
+        start_benchmark();
+        shuffle(keys, count);
+        shuffle(altkeys, count);
+        end_benchmark("Shuffle keys:");
+    }
 
     start_benchmark();
     for (j = 0; j < count; j++) {        
@@ -1252,24 +1263,32 @@ int main(int argc, char **argv) {
     }
     end_benchmark("Random access of existing elements:");
 
-    start_benchmark();
+
     for (j = 0; j < count; j++) {        
-        keys[j][0] += 20; /* Change first number to letter. */
-        dictEntry *de = dictFind(dict,keys[j]);
-        keys[j][0] -= 20;
+        dictEntry *de = dictFind(dict, altkeys[j]);        
         assert(de == NULL);        
     }
     end_benchmark("Accessing missing:");
 
     start_benchmark();
     for (j = 0; j < count; j++) {
-        int retval = dictDelete(dict,keys[j]);
+        int retval = dictDelete(dict, keys[j]);
         assert(retval == DICT_OK);
-        keys[j][0] += 50; /* Change first number to letter. */
-        retval = dictAdd(dict,keys[j],(void*)j);
+                
+        retval = dictAdd(dict, altkeys[j],(void*)j);
         assert(retval == DICT_OK);
     }
     end_benchmark("Removing and adding:");
+    
+    if(argc > 2){
+        char finalStats[1024];
+        dictGetStats(finalStats, 1024, dict);
+    
+        puts(stats);
+        puts(finalStats);
+    }
+    dictRelease(dict);
+
 }
 
 #endif
